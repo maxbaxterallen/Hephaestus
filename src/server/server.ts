@@ -776,6 +776,7 @@ import {
 	type ProposalType,
 } from "./proposals/proposal-files.js";
 import { prepareGoalProposalSeed } from "./proposals/goal-proposal-seed.js";
+import { validateGoalInlineWorkflow } from "./proposals/proposal-types.js";
 
 const VALID_TASK_STATES = new Set<string>(["todo", "in-progress", "blocked", "complete", "skipped"]);
 
@@ -17619,6 +17620,90 @@ async function handleApiRoute(
 		return;
 	}
 
+	// POST /api/sessions/:id/proposal/workflow/accept — accept a workflow proposal
+	const workflowProposalAcceptMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/proposal\/workflow\/accept$/);
+	if (workflowProposalAcceptMatch && req.method === "POST") {
+		const ownerSessionId = workflowProposalAcceptMatch[1];
+		if (!/^[A-Za-z0-9_-]+$/.test(ownerSessionId)) {
+			json({ error: "Invalid sessionId" }, 400);
+			return;
+		}
+		const proposalOwner = authenticateProposalOwner(ownerSessionId);
+		if (!proposalOwner) return;
+		const proposalStateDir = bobbitStateDir();
+
+		try {
+			const draft = await parseProposalFile(proposalStateDir, ownerSessionId, "workflow");
+			if (!draft.ok) {
+				json(draft, draft.code === "FILE_NOT_FOUND" ? 404 : 400);
+				return;
+			}
+			const fields = draft.value.fields;
+			const id = typeof fields.id === "string" ? fields.id.trim() : "";
+			const name = typeof fields.name === "string" ? fields.name.trim() : id;
+			const description = typeof fields.description === "string" ? fields.description : "";
+			const gates = Array.isArray(fields.gates) ? fields.gates : [];
+
+			if (!id) {
+				json({ ok: false, code: "MISSING_REQUIRED_FIELD", message: "Workflow id is required" }, 400);
+				return;
+			}
+
+			// Validate gate schema using the same validator as inline workflows
+			const gateError = validateGoalInlineWorkflow({ id, name, gates });
+			if (gateError) {
+				json(gateError, 400);
+				return;
+			}
+
+			// Resolve target project
+			const body = await readBody(req);
+			const bodyProjectId = (body && typeof body === "object" && !Array.isArray(body) && typeof (body as Record<string, unknown>).projectId === "string")
+				? (body as Record<string, unknown>).projectId as string
+				: undefined;
+			const targetProjectId = bodyProjectId
+				|| (typeof fields.projectId === "string" && fields.projectId.trim())
+				|| sessionManager.getSession(ownerSessionId)?.projectId
+				|| sessionManager.getPersistedSession(ownerSessionId)?.projectId;
+
+			if (!targetProjectId) {
+				json({ ok: false, code: "PROJECT_ID_REQUIRED", message: "No target project resolved" }, 400);
+				return;
+			}
+
+			const ctx = projectContextManager.getOrCreate(targetProjectId);
+			if (!ctx) {
+				json({ ok: false, code: "UNKNOWN_PROJECT", message: `Project not found: ${targetProjectId}` }, 404);
+				return;
+			}
+
+			// Merge the workflow into project config
+			const now = Date.now();
+			const workflow = { id, name, description, gates, createdAt: now, updatedAt: now };
+			ctx.workflowStore.put(workflow);
+
+			// Clean up proposal draft
+			try {
+				await deleteProposalFile(proposalStateDir, ownerSessionId, "workflow");
+			} catch (cleanupErr) {
+				console.warn(`[workflow-accept] Failed to delete proposal draft for ${ownerSessionId}:`, cleanupErr);
+			}
+
+			if (_broadcastToSession) {
+				_broadcastToSession(ownerSessionId, {
+					type: "proposal_cleared",
+					sessionId: ownerSessionId,
+					proposalType: "workflow",
+				});
+			}
+
+			json({ ok: true, workflow }, 200);
+		} catch (err) {
+			json({ error: String((err as Error)?.message ?? err) }, 500);
+		}
+		return;
+	}
+
 	const proposalRouteMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/proposal\/([^/]+)(\/edit|\/seed|\/restore|\/snapshot)?$/);
 	if (proposalRouteMatch) {
 		const sessionId = proposalRouteMatch[1];
@@ -17776,7 +17861,7 @@ async function handleApiRoute(
 			// proposals are excluded: their client acceptance mode and dispatch are
 			// determined solely by `proposal.fields.projectId`; mutation endpoints
 			// validate any dispatched explicit target as defense in depth.
-			if (proposalType === "goal" || proposalType === "staff" || proposalType === "role" || proposalType === "tool") {
+			if (proposalType === "goal" || proposalType === "staff" || proposalType === "role" || proposalType === "tool" || proposalType === "workflow") {
 				const proposalSession = sessionManager.getSession(sessionId) ?? sessionManager.getPersistedSession(sessionId);
 				const sessionProjectId = proposalSession?.projectId;
 				// Goal candidates reject malformed supplied selection centrally. Other

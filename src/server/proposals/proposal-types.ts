@@ -401,6 +401,11 @@ const toolPlugin = makeYamlPlugin({
 	requiredFields: ["tool", "action", "content"],
 });
 
+const workflowPlugin = makeYamlPlugin({
+	type: "workflow",
+	requiredFields: ["id", "name", "gates"],
+});
+
 const staffPlugin = makeYamlPlugin({
 	type: "staff",
 	requiredFields: ["name", "prompt"],
@@ -409,6 +414,7 @@ const staffPlugin = makeYamlPlugin({
 const REGISTRY: Record<ProposalType, ProposalTypePlugin> = {
 	goal: goalPlugin,
 	project: projectPlugin,
+	workflow: workflowPlugin,
 	role: rolePlugin,
 	tool: toolPlugin,
 	staff: staffPlugin,

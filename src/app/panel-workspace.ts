@@ -108,6 +108,7 @@ function persistPanelWorkspace(stateLike: any): void {
 const PROPOSAL_LABELS: Record<ProposalType, string> = {
 	goal: "Goal",
 	project: "Project",
+	workflow: "Workflow",
 	role: "Role",
 	tool: "Tool",
 	staff: "Staff",
@@ -998,7 +999,7 @@ export function panelTabIdFromLegacy(tab: LegacyPanelTab | string | null | undef
 	if (tab === "preview") return LIVE_PREVIEW_PANEL_TAB_ID;
 	if (tab === "inbox") return INBOX_PANEL_TAB_ID;
 	if (tab === "review") return reviewActiveTitle ? reviewPanelTabId(reviewActiveTitle) : null;
-	if (tab === "goal" || tab === "project" || tab === "role" || tab === "tool" || tab === "staff") {
+	if (tab === "goal" || tab === "project" || tab === "workflow" || tab === "role" || tab === "tool" || tab === "staff") {
 		return proposalPanelTabId(tab);
 	}
 	return null;

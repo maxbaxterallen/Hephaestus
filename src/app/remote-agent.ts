@@ -210,10 +210,11 @@ const PROPOSAL_TAG_TO_TYPE: Record<string, ProposalType> = {
 /** Maps ProposalType → legacy per-type callback name on RemoteAgent. */
 const TYPE_TO_LEGACY_CALLBACK: Record<ProposalType, string> = {
 	goal: "onGoalProposal",
+	project: "onProjectProposal",
+	workflow: "onWorkflowProposal",
 	role: "onRoleProposal",
 	tool: "onToolProposal",
 	staff: "onStaffProposal",
-	project: "onProjectProposal",
 };
 
 function parseToolPayload(value: unknown): Record<string, unknown> | null {

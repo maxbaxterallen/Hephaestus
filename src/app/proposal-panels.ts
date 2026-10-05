@@ -3784,10 +3784,75 @@ function projectProposalPanel() {
 	`;
 }
 
+function workflowProposalPanel() {
+	ensureMarkdownBlock();
+	const streaming = isProposalStreaming("workflow_proposal");
+	const proposal = state.activeProposals?.workflow;
+	const fields = proposal?.fields ?? {};
+	const proposalSessionId = proposal?.sessionId ?? activeSessionId();
+
+	const workflow = {
+		id: typeof fields.id === "string" ? fields.id : "",
+		name: typeof fields.name === "string" ? fields.name : "",
+		description: typeof fields.description === "string" ? fields.description : "",
+		gates: Array.isArray(fields.gates) ? fields.gates : [],
+	};
+
+	const handleAccept = async () => {
+		const sid = activeSessionId();
+		if (!sid) return;
+		const projectId = proposalProjectId("workflow", proposalSessionId);
+		try {
+			const resp = await gatewayFetch(
+				`/api/sessions/${encodeURIComponent(sid)}/proposal/workflow/accept`,
+				{ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId }) }
+			);
+			if (resp.ok) {
+				delete state.activeProposals.workflow;
+				recomputeAssistantHasProposal();
+				void closeCurrentProposalPanel("workflow", proposalSessionId);
+				if (proposalSessionId) void deleteProposalFile(proposalSessionId, "workflow");
+			} else {
+				const body = await resp.json().catch(() => ({}));
+				showConnectionError("Accept Failed", body?.message || body?.error || `Accept failed: HTTP ${resp.status}`);
+			}
+		} catch (err) {
+			showConnectionError("Accept Failed", `Accept failed: ${(err as Error)?.message ?? err}`);
+		}
+	};
+
+	const handleDismiss = async () => {
+		delete state.activeProposals.workflow;
+		recomputeAssistantHasProposal();
+		void closeCurrentProposalPanel("workflow", proposalSessionId);
+		if (proposalSessionId) void deleteProposalFile(proposalSessionId, "workflow");
+	};
+
+	return html`
+		<div class="goal-preview-panel flex-1 flex flex-col border-l border-border min-h-0 relative" data-panel="workflow-proposal">
+			${proposalToast()}
+			${crossProjectBanner("workflow", proposalSessionId)}
+			<div class="flex-1 overflow-y-auto p-5 flex flex-col gap-4">
+				<div class="text-sm font-semibold">${workflow.name || workflow.id || "Untitled Workflow"}</div>
+				${workflow.description ? html`<div class="text-xs text-muted-foreground">${workflow.description}</div>` : ""}
+				${workflow.id && workflow.gates.length > 0
+					? renderWorkflowInspector({ workflow: workflow as any })
+					: html`<div class="text-xs text-muted-foreground italic">No gate definitions yet.</div>`}
+			</div>
+			<div class="shrink-0 flex items-center justify-end gap-2 px-5 py-3 border-t border-border">
+				${streaming ? streamingBadge() : ""}
+				${Button({ variant: "ghost", onClick: handleDismiss, children: "Dismiss" })}
+				${Button({ variant: "default", onClick: handleAccept, disabled: streaming, children: "Accept" })}
+			</div>
+		</div>
+	`;
+}
+
 function proposalPanelForType(type: ProposalType) {
 	switch (type) {
 		case "goal": return goalProposalPanel();
 		case "project": return projectProposalPanel();
+		case "workflow": return workflowProposalPanel();
 		case "role": return rolePreviewPanel();
 		case "tool": return toolPreviewPanel();
 		case "staff": return staffPreviewPanel();
