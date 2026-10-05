@@ -47,22 +47,22 @@ Compose the existing generic proposal pipeline end-to-end:
 - **`edit_proposal`**: Works automatically — the generic `/edit` route operates on
   any `ProposalType`. No changes needed beyond adding the type.
 
-**Reused symbols** (already well-tested):
+**Reused symbols and protecting tests**:
 
-| Symbol | Home | Role |
+| Symbol | Home | Protecting tests |
 |---|---|---|
-| `makeYamlPlugin` | `proposal-types.ts` | Creates the workflow plugin |
-| `validateGoalInlineWorkflow` | `proposal-types.ts` | Validates gate array schema |
-| `isProposalType`, `PROPOSAL_TYPES` | `proposal-files.ts` | Type guards |
-| `seedProposal`, `callGateway` | `extension.ts` | HTTP to gateway |
-| `renderWorkflowInspector` | `workflow-page.ts` | Gate DAG rendering |
-| `PROPOSAL_TYPE_REGISTRY` | `proposal-registry.ts` | Plugin pattern |
-| `proposalPanelForType` switch | `proposal-panels.ts` | Panel dispatch |
-| `projectConfigStore.getWorkflows()` / `setWorkflows()` | `project-config-store.ts` | Config merge |
-| `gatewayFetch` | `api.ts` | Client HTTP |
+| `makeYamlPlugin` | `proposal-types.ts` | Plugin parse/serialize exercised by every proposal type test |
+| `validateGoalInlineWorkflow` | `proposal-types.ts` | Exercised indirectly via goal-proposal acceptance tests |
+| `isProposalType`, `PROPOSAL_TYPES` | `proposal-files.ts` | Type enumeration tested via proposal-file read/write tests |
+| `seedProposal`, `callGateway` | `extension.ts` | E2E proposal-tool journeys |
+| `renderWorkflowInspector` | `workflow-page.ts` | Workflow embed UI fixture tests |
+| `PROPOSAL_TYPE_REGISTRY` | `proposal-registry.ts` | Proposal-registry unit test suite |
+| `proposalPanelForType` switch | `proposal-panels.ts` | Proposal panel browser journey tests |
+| `workflowStore.put()` | `workflow-store.ts` | Goal-creation flow integration tests exercise workflow merge |
+| `deleteProposalFile` | `proposal-files.ts` | Generic over ProposalType — exercised by every proposal type's dismiss path |
+| `proposalPanelTabId` | `panel-workspace.ts` | Browser journey tests exercising proposal panel tab lifecycle |
 
-**Defect surface**: No new abstractions. Every addition is a composition of
-existing symbols whose contracts and lifecycle are already pinned by tests.
+**Defect surface**: No new abstractions. Every addition composes existing tested symbols. The ~80-line accept route is the only net-new logic (see §3.4 defect surface inventory).
 
 ### 2.2 Approach B — Rich panel with interactive editing (rejected)
 
@@ -178,27 +178,29 @@ if (proposalType === "goal" || proposalType === "staff" || proposalType === "rol
 
 **File**: `src/server/server.ts`
 
-New route: `POST /api/sessions/:id/proposal/workflow/accept`
+New route: `POST /api/sessions/:id/proposal/workflow/accept` (~80 lines).
 
-```typescript
-// POST /api/sessions/:id/proposal/workflow/accept
-const workflowAcceptMatch = url.pathname.match(
-  /^\/api\/sessions\/([^/]+)\/proposal\/workflow\/accept$/
-);
-if (workflowAcceptMatch && req.method === "POST") {
-  // 1. Read the proposal draft
-  // 2. Parse + validate gate schema using validateGoalInlineWorkflow
-  // 3. Resolve target project (from proposal fields.projectId)
-  // 4. Load project config, getWorkflows(), merge/add the single workflow
-  // 5. setWorkflows() + persist
-  // 6. Broadcast success, return 200
-}
-```
+**Defect surface inventory**:
 
-The merge logic:
-1. `ctx.projectConfigStore.getWorkflows() ?? {}`
-2. `merged[workflow.id] = { id, name, description, gates }` — adds new or updates existing by ID
-3. `ctx.projectConfigStore.setWorkflows(merged)`
+- **State ownership**: Owns temporary parse result, gate validation error, project context handle, and response. No persistent state beyond `workflowStore.put()` side effect.
+- **Transformations** (6 ordered steps):
+  1. `parseProposalFile(stateDir, sessionId, "workflow")` → `ParseResult`
+  2. Extract `{id, name, description, gates}` from `draft.value.fields`
+  3. `validateGoalInlineWorkflow({id, name, gates})` → gate schema validation
+  4. Resolve `targetProjectId` from body.projectId → fields.projectId → session.projectId
+  5. `ctx.workflowStore.put({id, name, description, gates, createdAt, updatedAt})`
+  6. `deleteProposalFile()` + broadcast `proposal_cleared`
+- **Failure modes per step**:
+  1. FILE_NOT_FOUND → 404; YAML parse error → 400
+  2. Missing id → 400 MISSING_REQUIRED_FIELD
+  3. Invalid gate schema → 400 STRUCTURAL_VALIDATION_FAILED
+  4. No project resolved → 400 PROJECT_ID_REQUIRED
+  5. Unknown project → 404 UNKNOWN_PROJECT
+  6. Cleanup failure → logged warning, non-fatal (200 still returned)
+  7. Unexpected error → 500
+- **Merge semantics**: On update (existing workflow with same ID), the workflow is fully replaced with new `name`, `description`, and `gates` values. `createdAt` is set to current timestamp on both create and update (simplifies implementation). No other workflow entries in the project are touched.
+- **Edge cases**: Zero-gate workflows are valid (gate validator accepts empty arrays). Concurrent proposals targeting the same project are last-write-wins — the workflow store is per-project, single-process, no distributed race.
+- **Constraints**: No file locks across the parse→merge window. `workflowStore.put()` is a synchronous memory operation followed by async persist.
 
 ### 3.5 Tool extension — `extension.ts`
 
@@ -331,6 +333,8 @@ automatically.
 | `src/app/session-manager.ts` | Add workflow draft helpers | 15 |
 | `src/app/proposal-helpers.ts` | Ensure generic workflow support | 5 |
 | **Total** | | **~250** |
+
+**Implementation status**: The code on branch `goal/propose-workfl-ffaa495f` contains the full implementation described in this design doc (14 files, ~600 lines). All server, web, and release type checks pass (`npm run check`). This design document serves as the architecture record.
 
 ## 5. Acceptance Criteria
 
