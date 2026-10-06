@@ -45,13 +45,14 @@ Accept. Project proposals intentionally differ: only their own
 draft from Headquarters cannot accidentally turn an omitted-id create into a
 protected Headquarters mutation.
 
-## The five proposal types
+## The six proposal types
 
-Cross-project targeting applies to all five `propose_*` tools:
+Cross-project targeting applies to all six `propose_*` tools:
 
 | Tool | Target semantics |
 |---|---|
 | `propose_goal` | Goal created under the target project's worktree/branch and validated against the target's workflows. |
+| `propose_workflow` | Workflow merged into the target project's `project.yaml` without touching other workflows. |
 | `propose_role` | Role config written to the target project's config store. |
 | `propose_tool` | Tool config written to the target project's config store. |
 | `propose_staff` | Staff agent created in the target project. |
@@ -91,7 +92,7 @@ for the full contract.
 
 ### Non-goal target resolution
 
-For `propose_role`, `propose_tool`, and `propose_staff`, the legacy resolver is
+For `propose_workflow`, `propose_role`, `propose_tool`, and `propose_staff`, the legacy resolver is
 unchanged:
 
 1. A trimmed, non-empty explicit `projectId` wins.
